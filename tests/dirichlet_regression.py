@@ -292,7 +292,73 @@ def second_derivative_wrt_rho_beta(mu, phi, Minv, beta, W, X, Y, Z, MinvX=None, 
 
 ####################
 
-def objective_func_loglik_no_spatial(x, X, Y, Z=None, phi=None, epsilon=0, regularization_lambda=0):
+def crossentropy_no_spatial(x, X, Y, regularization_lambda=0, epsilon=0):
+    K = X.shape[-1]
+    J = Y.shape[-1]
+    n = X.shape[0]
+    beta = np.zeros((K,J))
+    beta[:,1:] = x.reshape((K,J-1))
+    mu = compute_mu(X, beta)
+    obj = - 1/n * np.sum(Y*np.log(mu+epsilon))
+    if regularization_lambda!=0:
+        obj = obj + regularization_lambda * np.linalg.norm(x)**2
+    return obj
+
+def jac_crossentropy_no_spatial(x, X, Y, regularization_lambda=0, epsilon=0):
+    K = X.shape[-1]
+    J = Y.shape[-1]
+    n = X.shape[0]
+    beta = np.zeros((K,J))
+    beta[:,1:] = x.reshape((K,J-1))
+    mu = compute_mu(X, beta)
+    
+    grad = np.zeros((K,J))
+    term = Y - mu*np.sum(Y, axis=1).reshape(-1,1)
+    for i in range(n):
+        grad += np.outer(X[i],term[i])
+        
+    return -1/n * grad[:,1:].flatten() + 2*regularization_lambda*x
+
+
+def crossentropy_spatial(x, X, Y, W, regularization_lambda=0, epsilon=0):
+    K = X.shape[-1]
+    J = Y.shape[-1]
+    n = X.shape[0]
+    beta = np.zeros((K,J))
+    beta[:,1:] = x[:-1].reshape((K,J-1))
+    rho = x[-1]
+    M = np.identity(n) - rho*W
+    mu = compute_mu_spatial(X, beta, M)
+    obj = - 1/n * np.sum(Y*np.log(mu+epsilon))
+    if regularization_lambda!=0:
+        obj = obj + regularization_lambda * np.linalg.norm(x)**2
+    return obj
+
+def jac_crossentropy_spatial(x, X, Y, W, regularization_lambda=0, epsilon=0):
+    K = X.shape[-1]
+    J = Y.shape[-1]
+    n = X.shape[0]
+    beta = np.zeros((K,J))
+    beta[:,1:] = x[:-1].reshape((K,J-1))
+    rho = x[-1]
+    M = np.identity(n) - rho*W
+    MinvX = np.linalg.solve(M,X)
+    mu = compute_mu_spatial(X, beta, M, MinvX=MinvX)
+    
+    grad = np.zeros((K,J))
+    term = Y - mu*np.sum(Y, axis=1).reshape(-1,1)
+    for i in range(n):
+        grad += np.outer(MinvX[i],term[i])
+    
+    MinvXbeta = np.matmul(MinvX, beta)
+    WMinvXbeta = np.matmul(W,MinvXbeta)
+    U = np.linalg.solve(M,WMinvXbeta)
+    sum_omega = np.sum(mu*U,axis=1)
+    derivative_rho = np.sum(Y * (U - sum_omega.reshape(-1,1)))
+    
+    return -1/n * np.concatenate([grad[:,1:].flatten(),[derivative_rho]]) + 2*regularization_lambda*x
+
+def objective_func_loglik_no_spatial(x, X, Y, Z=None, phi=None, regularization_lambda=0, epsilon=0):
     K = X.shape[-1]
     J = Y.shape[-1]
     n = X.shape[0]
@@ -306,10 +372,10 @@ def objective_func_loglik_no_spatial(x, X, Y, Z=None, phi=None, epsilon=0, regul
     mu = compute_mu(X, beta)
     obj = - 1/n * dirichlet_loglikelihood(mu,phi,Y,epsilon=epsilon)
     if regularization_lambda!=0:
-        obj = obj + regularization_lambda * np.linalg.norm(x)
+        obj = obj + regularization_lambda * np.linalg.norm(x)**2
     return obj
 
-def jac_objective_func_loglik_no_spatial(x, X, Y, Z=None, phi=None, epsilon=0, regularization_lambda=0):
+def jac_objective_func_loglik_no_spatial(x, X, Y, Z=None, phi=None, regularization_lambda=0, epsilon=0):
     K = X.shape[-1]
     J = Y.shape[-1]
     n = X.shape[0]
@@ -324,12 +390,13 @@ def jac_objective_func_loglik_no_spatial(x, X, Y, Z=None, phi=None, epsilon=0, r
     beta_grad = gradient_wrt_beta(mu, phi, X, Y, epsilon=epsilon)[:,1:]
 
     if Z is None:
-        return -beta_grad.flatten()
+        return -1/n * beta_grad.flatten() + 2*regularization_lambda*x
     else:
         gamma_grad = gradient_wrt_gamma(mu, phi, Y, Z, epsilon=epsilon)
-        return(-np.concatenate([beta_grad.flatten(),gamma_grad]))
+        return(-1/n * np.concatenate([beta_grad.flatten(),gamma_grad]) + 2*regularization_lambda*x)
 
-def objective_func_loglik_spatial(x, X, Y, W, Z=None, phi=None, epsilon=0, regularization_lambda=0):
+    
+def objective_func_loglik_spatial(x, X, Y, W, Z=None, phi=None, regularization_lambda=0, epsilon=0):
     K = X.shape[-1]
     J = Y.shape[-1]
     n = X.shape[0]
@@ -345,10 +412,38 @@ def objective_func_loglik_spatial(x, X, Y, W, Z=None, phi=None, epsilon=0, regul
     mu = compute_mu_spatial(X, beta, M)
     obj = - 1/n * dirichlet_loglikelihood(mu,phi,Y,epsilon=epsilon)
     if regularization_lambda!=0:
-        obj = obj + regularization_lambda * np.linalg.norm(x)
+        obj = obj + regularization_lambda * np.linalg.norm(x)**2
     return obj
 
+def jac_objective_func_loglik_spatial(x, X, Y, W, Z=None, phi=None, regularization_lambda=0, epsilon=0):
+    K = X.shape[-1]
+    J = Y.shape[-1]
+    n = X.shape[0]
+    beta = np.zeros((K,J))
+    if phi is None:
+        beta[:,1:K*(J-1)] = x[:K*(J-1)].reshape((K,J-1))
+        gamma_var = x[K*(J-1):-1]
+        phi = np.exp(np.matmul(Z,gamma_var))
+    else:
+        beta[:,1:] = x[:-1].reshape((K,J-1))
+    rho = x[-1]
+    M = np.identity(n) - rho*W
+    MinvX = np.linalg.solve(M,X)
+    mu = compute_mu_spatial(X, beta, M, MinvX=MinvX)
+    
+    beta_grad = gradient_wrt_beta(mu, phi, MinvX, Y, epsilon=epsilon)[:,1:]
+    
+    MinvW = np.linalg.solve(M,W)
+    rho_derivative = derivative_wrt_rho(mu, phi, beta, M, W, X, Y, Z, MinvX=None, epsilon=epsilon)
 
+    if Z is None:
+        return (-1/n * np.concatenate([beta_grad.flatten(),[rho_derivative]]) + 2*regularization_lambda*x)
+    else:
+        gamma_grad = gradient_wrt_gamma(mu, phi, Y, Z, epsilon=epsilon)
+        return(-1/n * np.concatenate([beta_grad.flatten(),gamma_grad,[rho_derivative]]) + 2*regularization_lambda*x)
+
+    
+    
 ####################
 
 class dirichletRegressor:
@@ -360,7 +455,7 @@ class dirichletRegressor:
         self.random_state = random_state
         self.spatial = spatial
         
-    def fit(self, X , Y, W=None, beta_0=None, rho_0=0, parametrization='common', gamma_0=None, Z=None, fit_intercept=True):
+    def fit(self, X , Y, W=None, beta_0=None, rho_0=0, parametrization='common', gamma_0=None, Z=None, fit_intercept=True, regularization=0, verbose=True, loss='likelihood'):
         
         n,K = np.shape(X)
         J = Y.shape[1]
@@ -384,23 +479,31 @@ class dirichletRegressor:
             X_f = np.copy(X)
                 
         if self.spatial:
-            if parametrization=='common':
+            if loss=='crossentropy':
                 params0 = np.concatenate([beta_0.flatten(),[rho_0]])
                 min_bounds, max_bounds = -np.inf*np.ones(len(params0)), np.inf*np.ones(len(params0))
                 min_bounds[-1], max_bounds[-1] = -1, 1
                 bounds = Bounds(min_bounds, max_bounds)
-                solution = minimize(objective_func_loglik_spatial, params0, args=(X_f, Y, W, None, self.phi), bounds=bounds, options={'maxiter':self.maxiter, 'maxfun':self.maxfun})
+                solution = minimize(crossentropy_spatial, params0, args=(X_f, Y, W, regularization), bounds=bounds, jac = jac_crossentropy_spatial)
                 self.beta = solution.x[:-1].reshape((K,J-1))
-                
             else:
-                params0 = np.concatenate([beta_0.flatten(),gamma_0,[rho_0]])
-                min_bounds, max_bounds = -np.inf*np.ones(len(params0)), np.inf*np.ones(len(params0))
-                min_bounds[-1], max_bounds[-1] = -1, 1
-                bounds = Bounds(min_bounds, max_bounds)
-                solution = minimize(objective_func_loglik_spatial, params0, args=(X_f, Y, W, Z), bounds=bounds, options={'maxiter':self.maxiter, 'maxfun':self.maxfun})
-                self.beta = solution.x[:K*(J-1)].reshape((K,J-1))
-                self.gamma = solution.x[K*(J-1):-1]
-                self.phi = np.exp(np.matmul(Z,self.gamma))
+                if parametrization=='common':
+                    params0 = np.concatenate([beta_0.flatten(),[rho_0]])
+                    min_bounds, max_bounds = -np.inf*np.ones(len(params0)), np.inf*np.ones(len(params0))
+                    min_bounds[-1], max_bounds[-1] = -1, 1
+                    bounds = Bounds(min_bounds, max_bounds)
+                    solution = minimize(objective_func_loglik_spatial, params0, args=(X_f, Y, W, None, self.phi, regularization), bounds=bounds, options={'maxiter':self.maxiter, 'maxfun':self.maxfun})
+                    self.beta = solution.x[:-1].reshape((K,J-1))
+
+                else:
+                    params0 = np.concatenate([beta_0.flatten(),gamma_0,[rho_0]])
+                    min_bounds, max_bounds = -np.inf*np.ones(len(params0)), np.inf*np.ones(len(params0))
+                    min_bounds[-1], max_bounds[-1] = -1, 1
+                    bounds = Bounds(min_bounds, max_bounds)
+                    solution = minimize(objective_func_loglik_spatial, params0, args=(X_f, Y, W, Z, None, regularization), bounds=bounds, options={'maxiter':self.maxiter, 'maxfun':self.maxfun})
+                    self.beta = solution.x[:K*(J-1)].reshape((K,J-1))
+                    self.gamma = solution.x[K*(J-1):-1]
+                    self.phi = np.exp(np.matmul(Z,self.gamma))
             self.rho = solution.x[-1]
             beta = np.zeros((K, J))
             beta[:,1:] = self.beta
@@ -408,26 +511,31 @@ class dirichletRegressor:
             self.mu = compute_mu_spatial(X_f, beta, M)
             
         else: 
-            if parametrization=='common':
+            if loss=='crossentropy':
                 params0 = beta_0.flatten()
-                #solution = minimize(objective_func_loglik_no_spatial, params0, args=(X_f,Y,None,self.phi))
-                solution = minimize(objective_func_loglik_no_spatial, params0, args=(X_f,Y,None,self.phi), jac = jac_objective_func_loglik_no_spatial)
+                solution = minimize(crossentropy_no_spatial, params0, args=(X_f, Y, regularization), jac = jac_crossentropy_no_spatial)
                 self.beta = solution.x.reshape((K,J-1))
             else:
-                params0 = np.concatenate([beta_0.flatten(),gamma_0])
-                solution = minimize(objective_func_loglik_no_spatial, params0, args=(X_f,Y,Z))
-                self.beta = solution.x[:K*(J-1)].reshape((K,J-1))
-                self.gamma = solution.x[K*(J-1):]
-                self.phi = np.exp(np.matmul(Z,self.gamma))
+                if parametrization=='common':
+                    params0 = beta_0.flatten()
+                    #solution = minimize(objective_func_loglik_no_spatial, params0, args=(X_f,Y,None,self.phi,regularization))
+                    solution = minimize(objective_func_loglik_no_spatial, params0, args=(X_f,Y,None,self.phi,regularization), jac = jac_objective_func_loglik_no_spatial)
+                    self.beta = solution.x.reshape((K,J-1))
+                else:
+                    params0 = np.concatenate([beta_0.flatten(),gamma_0])
+                    solution = minimize(objective_func_loglik_no_spatial, params0, args=(X_f,Y,Z,None,regularization), jac = jac_objective_func_loglik_no_spatial)
+                    self.beta = solution.x[:K*(J-1)].reshape((K,J-1))
+                    self.gamma = solution.x[K*(J-1):]
+                    self.phi = np.exp(np.matmul(Z,self.gamma))
                 
             beta = np.zeros((K, J))
             beta[:,1:] = self.beta
             self.mu = compute_mu(X_f, beta)
                 
+        if verbose:
+            print(solution.message)
         
-        print(solution.message)
-        
-    def compute_mu(self, X, W=None, return_mu=False):
+    def pred(self, X, W=None):
         beta = np.zeros((self.K, self.J))
         beta[:,1:] = self.beta
         if self.intercept:
@@ -435,9 +543,8 @@ class dirichletRegressor:
             X_f[:,1:] = X
         if self.spatial:
             M = np.identity(X.shape[0]) - self.rho*W
-            self.mu = compute_mu_spatial(X_f, beta, M)
+            mu = compute_mu_spatial(X_f, beta, M)
         else:
-            self.mu = compute_mu(X_f, beta)
-        if return_mu:
-            return self.mu
+            mu = compute_mu(X_f, beta)
+        return mu
         
