@@ -7,24 +7,43 @@ from scipy import sparse
 from scipy.optimize import minimize, Bounds
 
 
+
 def compute_mu(X, beta, Xbeta=None):
-    n = np.shape(X)[0]
-    J = np.shape(beta)[1] #number of classes
+    """
+    Compute the log-odds probabilities vector mu.
+
+    Parameters:
+        X (ndarray): Input matrix of shape (n, K) with n the number of samples and K the number of features.
+        beta (ndarray): Coefficient matrix of shape (K, J) where J is the number of classes.
+        Xbeta (ndarray, optional): Precomputed matrix product X * beta. If not provided, it will be computed.
+
+    Returns:
+        ndarray: Probabilities matrix mu of shape (n, J) where n is the number of samples and J is the number of classes.
+    """
     if Xbeta is None:
         Xbeta = np.matmul(X,beta)
-    mu = np.zeros((n,J))
-    # compute the softmax
-    exp_Xbeta = np.exp(Xbeta)
-    exp_Xbeta[Xbeta>700] = 1e305 #we replace the values that overflow
-    sum_exp_Xbeta = np.sum(exp_Xbeta,axis=1)
-    mu = exp_Xbeta/sum_exp_Xbeta[:,None]
-    mu[mu==0]=1e-305 #we replace the 0s
+    exp_Xbeta = np.exp(Xbeta - np.max(Xbeta, axis=1, keepdims=True))
+    sum_exp_Xbeta = np.sum(exp_Xbeta, axis=1, keepdims=True)
+    mu = exp_Xbeta / sum_exp_Xbeta
+    mu[mu==0] = 1e-305  # Replace 0 with a small positive value
     return mu
 
 
 def compute_mu_spatial(X, beta, M, Xbeta=None, MinvX=None, MXbeta=None):
-    n = np.shape(X)[0]
-    J = np.shape(beta)[1]
+    """
+    Compute the log-odds probabilities vector mu with spatial correlation.
+
+    Parameters:
+        X (ndarray): Input matrix of shape (n, K) with n the number of samples and K the number of features.
+        beta (ndarray): Coefficient matrix of shape (K, J) where J is the number of classes.
+        M (ndarray or sparse matrix): Spatial correlation matrix of shape (n, n) or sparse matrix format.
+        Xbeta (ndarray, optional): Precomputed matrix product X * beta. If not provided, it will be computed.
+        MinvX (ndarray, optional): Precomputed matrix product M_inverse * X. If not provided, it will be computed.
+        MXbeta (ndarray, optional): Precomputed matrix product M_inverse * X * beta. If not provided, it will be computed.
+
+    Returns:
+        ndarray: Probabilities matrix mu of shape (n, J) where n is the number of samples and J is the number of classes.
+    """
     if MXbeta is None:
         if MinvX is None:
             if Xbeta is None:
@@ -32,11 +51,9 @@ def compute_mu_spatial(X, beta, M, Xbeta=None, MinvX=None, MXbeta=None):
             MXbeta = sparse.linalg.spsolve(sparse.csc_matrix(M),Xbeta)
         else:
             MXbeta = np.matmul(MinvX,beta)
-    mu = np.zeros((n,J))
-    exp_MXbeta = np.exp(MXbeta)
-    exp_MXbeta[MXbeta>700] = 1e305
-    sum_exp_MXbeta = np.sum(exp_MXbeta,axis=1)
-    mu = exp_MXbeta/sum_exp_MXbeta[:,None]
+    exp_MXbeta = np.exp(MXbeta - np.max(MXbeta, axis=1, keepdims=True))
+    sum_exp_MXbeta = np.sum(exp_MXbeta, axis=1, keepdims=True)
+    mu = exp_MXbeta / sum_exp_MXbeta
     mu[mu==0]=1e-305
     return mu
 
@@ -44,6 +61,25 @@ def compute_mu_spatial(X, beta, M, Xbeta=None, MinvX=None, MXbeta=None):
 
 
 def dirichlet_loglikelihood(mu,phi,Y,epsilon=0):
+    """
+    Compute the log-likelihood of Dirichlet distribution given parameters.
+
+    Parameters:
+        mu (ndarray): Probability matrix of shape (n, J) representing Dirichlet distribution parameters,
+                      where n is the number of samples and J is the number of classes.
+        phi (ndarray): Concentration parameter array of shape (J,) representing Dirichlet distribution parameters.
+        Y (ndarray): Observation matrix of shape (n, J) representing the observed values,
+                     where n is the number of samples and J is the number of classes.
+        epsilon (float, optional): Small value added to Y to avoid log(0) calculations. Default is 0.
+
+    Returns:
+        float: Log-likelihood of the Dirichlet distribution.
+
+    Notes:
+        The log-likelihood is computed based on the formula:
+            sum(loggamma(phi)) - sum(loggamma(phi_mu)) + sum((phi_mu - 1) * log(Y + epsilon))
+        where phi_mu = phi.reshape(-1, 1) * mu.
+    """
     phi_mu = phi.reshape(-1,1) * mu
     sum_loggamma_phi_mu = np.sum(loggamma(phi_mu),axis=1)
     sum_phi_mu_times_logY = np.sum( (phi_mu-1)*np.log(Y+epsilon) , axis=1 )
@@ -63,8 +99,7 @@ def gradient_wrt_beta(mu, phi, X, Y, epsilon=0):
     sum_mu_digamma_phi_mu_minus_sum_mu_logY = np.sum(mu * digamma_phi_mu, axis=1) - np.sum(mu*logY,axis=1)
     logY_minus_digamma_phi_mu = np.log(Y + epsilon) - digamma_phi_mu
     mu_phi_times_sum_terms = mu * phi.reshape(-1,1)*(sum_mu_digamma_phi_mu_minus_sum_mu_logY.reshape(-1,1) + logY_minus_digamma_phi_mu)
-    for i in range(n):
-        gradient += np.outer(X[i],mu_phi_times_sum_terms[i])
+    gradient = np.einsum('ni,nj->ij', X, mu_phi_times_sum_terms)
     return gradient
 
 
@@ -312,10 +347,8 @@ def jac_crossentropy_no_spatial(x, X, Y, regularization_lambda=0, epsilon=0):
     beta[:,1:] = x.reshape((K,J-1))
     mu = compute_mu(X, beta)
     
-    grad = np.zeros((K,J))
     term = Y - mu*np.sum(Y, axis=1).reshape(-1,1)
-    for i in range(n):
-        grad += np.outer(X[i],term[i])
+    grad = np.einsum('ni,nj->ij', X, term)
         
     return -1/n * grad[:,1:].flatten() + 2*regularization_lambda*x
 
@@ -345,10 +378,8 @@ def jac_crossentropy_spatial(x, X, Y, W, regularization_lambda=0, epsilon=0):
     MinvX = np.linalg.solve(M,X)
     mu = compute_mu_spatial(X, beta, M, MinvX=MinvX)
     
-    grad = np.zeros((K,J))
     term = Y - mu*np.sum(Y, axis=1).reshape(-1,1)
-    for i in range(n):
-        grad += np.outer(MinvX[i],term[i])
+    grad = np.einsum('ni,nj->ij', MinvX, term)
     
     MinvXbeta = np.matmul(MinvX, beta)
     WMinvXbeta = np.matmul(W,MinvXbeta)
