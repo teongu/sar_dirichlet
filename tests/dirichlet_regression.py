@@ -110,7 +110,7 @@ def gradient_wrt_gamma(mu, phi, Y, Z, epsilon=0):
     return(derivative_gamma)
 
 
-def derivative_wrt_rho(mu, phi, beta, M, W, X, Y, Z, MinvX=None, MinvXbeta=None, alpha=None, epsilon=0):
+def derivative_wrt_rho(mu, phi, beta, M, W, X, Y, MinvX=None, MinvXbeta=None, alpha=None, epsilon=0):
     if MinvXbeta is None:
         if MinvX is None:
             MinvX = np.linalg.solve(M,X)
@@ -191,36 +191,13 @@ def hessian_wrt_beta(mu, phi, X, Y, alpha=None, epsilon=0):
     return hessian
 
 
+
 def second_derivative_beta_gamma(mu, phi, beta, X, Y, Z, epsilon=0):
     K = np.shape(X)[1]
     J = np.shape(Y)[1]
-    if len(phi.shape)==1:
-        K_phi=1
-    else:
-        K_phi = phi.shape[-1]
+    K_Z = Z.shape[-1]
     n = np.shape(Y)[0]
-    derivatives = np.zeros((K_phi,K,J))
-    for i in range(n):
-        digamma_phi_mu = digamma(phi[i]*mu[i])
-        trigamma_phi_mu = polygamma(1,phi[i]*mu[i])
-        logYi = np.log(Y[i]+epsilon)
-        sum_temp = np.sum(mu[i]*(logYi - digamma_phi_mu - mu[i]*phi[i]*trigamma_phi_mu))
-        phi_Z_i = phi[i]*Z[i,:]
-        for d in range(J):
-            temp_d = mu[i,d]*( logYi[d] - digamma_phi_mu[d] - mu[i,d]*phi[i]*trigamma_phi_mu[d] - sum_temp )
-            for p in range(K):
-                derivatives[:,p,d] += phi_Z_i*X[i,p]*temp_d
-    return(derivatives)
-
-def second_derivative_beta_gamma_2(mu, phi, beta, X, Y, Z, epsilon=0):
-    K = np.shape(X)[1]
-    J = np.shape(Y)[1]
-    if len(phi.shape)==1:
-        K_phi=1
-    else:
-        K_phi = phi.shape[-1]
-    n = np.shape(Y)[0]
-    derivatives = np.zeros((K_phi,K,J))
+    derivatives = np.zeros((K_Z,K,J))
     for i in range(n):
         digamma_phi_mu = digamma(phi[i]*mu[i])
         trigamma_phi_mu = polygamma(1,phi[i]*mu[i])
@@ -235,20 +212,18 @@ def second_derivative_beta_gamma_2(mu, phi, beta, X, Y, Z, epsilon=0):
     return(derivatives)
 
 
-def second_derivative_wrt_rho(mu, phi, Minv, beta, W, X, Y, Z, MinvX=None, alpha=None, epsilon=0):
+def second_derivative_wrt_rho(mu, phi, beta, M, W, X, Y, MinvX=None, MinvXbeta=None, alpha=None, epsilon=0):
     n = np.shape(Y)[0]
-    sum_i = 0
-    if MinvX is None:
-        MinvXbeta = np.matmul(Minv,np.matmul(X,beta))
-    else:
-        MinvXbeta = np.matmul(MinvX,beta)
-    MinvW = np.matmul(Minv,W)
-    U = np.matmul(MinvW, MinvXbeta)
-    V = np.matmul(MinvW, U)
+    if MinvXbeta is None:
+        if MinvX is None:
+            MinvX = np.linalg.solve(M,X)
+        MinvXbeta = np.matmul(MinvX, beta)
+    WMinvXbeta = np.matmul(W,MinvXbeta)
+    U = np.linalg.solve(M,WMinvXbeta)
+    V = np.linalg.solve(M,np.matmul(W, U))
     if alpha is None:
-        alpha = np.copy(mu)
-        for j in range(J):
-            alpha[:,j] = phi*mu[:,j]
+        alpha = mu*phi[:,None]
+    sum_i = 0
     for i in range(n):
         omega = mu[i]*U[i]
         sum_omega = np.sum(omega)
@@ -269,43 +244,39 @@ def second_derivative_wrt_rho(mu, phi, Minv, beta, W, X, Y, Z, MinvX=None, alpha
     return sum_i
 
 
-def second_derivative_wrt_rho_gamma(mu, phi, Minv, beta, W, X, Y, Z, MinvX=None, alpha=None, epsilon=0):
+def second_derivative_wrt_rho_gamma(mu, phi, beta, M, W, X, Y, Z, MinvX=None, MinvXbeta=None, alpha=None, epsilon=0):
     n = np.shape(Y)[0]
-    K = np.shape(X)[1]
-    if MinvX is None:
-        MinvXbeta = np.matmul(Minv,np.matmul(X,beta))
-    else:
-        MinvXbeta = np.matmul(MinvX,beta)
-    U = np.matmul(np.matmul(Minv,W), MinvXbeta)
-    derivative_rho_gamma = np.zeros(K)
+    K_Z = np.shape(Z)[1]
+    if MinvXbeta is None:
+        if MinvX is None:
+            MinvX = np.linalg.solve(M,X)
+        MinvXbeta = np.matmul(MinvX, beta)
+    WMinvXbeta = np.matmul(W,MinvXbeta)
+    U = np.linalg.solve(M,WMinvXbeta)
+    derivative_rho_gamma = np.zeros(K_Z)
     if alpha is None:
-        alpha = np.copy(mu)
-        for j in range(J):
-            alpha[:,j] = phi*mu[:,j]
+        alpha = mu*phi[:,None]
     for i in range(n):
         sum_omega = np.sum(mu[i]*U[i])
         digamma_alpha = digamma(alpha[i])
         trigamma_alpha = polygamma(1,alpha[i])
-        derivative_rho_gamma += Z[i,:]*phi[i]*np.sum( mu[i]*( np.log(Y[i]+epsilon)*(U[i]-sum_omega) - U[i]*(digamma_alpha-np.sum(mu[i]*digamma_alpha))  
-                                                             - phi[i]*U[i]*(mu[i]*trigamma_alpha - np.sum(mu[i]**2*trigamma_alpha)) ) )
+        derivative_rho_gamma += Z[i,:]*phi[i]*np.sum( mu[i]*( np.log(Y[i]+epsilon)*(U[i]-sum_omega) - U[i]*(digamma_alpha-np.sum(mu[i]*digamma_alpha)) - phi[i]*U[i]*(mu[i]*trigamma_alpha - np.sum(mu[i]**2*trigamma_alpha)) ) )
     return(derivative_rho_gamma)
 
 
-def second_derivative_wrt_rho_beta(mu, phi, Minv, beta, W, X, Y, Z, MinvX=None, alpha=None, epsilon=0):
+def second_derivative_wrt_rho_beta(mu, phi, beta, M, W, X, Y, MinvX=None, MinvXbeta=None, alpha=None, epsilon=0):
     n = np.shape(Y)[0]
     K = np.shape(X)[1]
     J = np.shape(Y)[1]
     if MinvX is None:
-        MinvX = np.matmul(Minv,X)
-    MinvXbeta = np.matmul(MinvX,beta)
-    MinvW = np.matmul(Minv,W)
-    U = np.matmul(MinvW, MinvXbeta)
-    Q = np.matmul(MinvW,MinvX)
+        MinvX = np.linalg.solve(M,X)
+    WMinvX = np.matmul(W, MinvX)
+    WMinvXbeta = np.matmul(WMinvX,beta)
+    Q = np.linalg.solve(M,WMinvX)
+    U = np.matmul(Q,beta)
     hessian = np.zeros((K,J))
     if alpha is None:
-        alpha = np.copy(mu)
-        for j in range(J):
-            alpha[:,j] = phi*mu[:,j]
+        alpha = mu*phi[:,None]
     for i in range(n):
         omega = mu[i]*U[i]
         sum_omega = np.sum(omega)
@@ -465,7 +436,7 @@ def jac_objective_func_loglik_spatial(x, X, Y, W, Z=None, phi=None, regularizati
     beta_grad = gradient_wrt_beta(mu, phi, MinvX, Y, epsilon=epsilon)[:,1:]
     
     MinvW = np.linalg.solve(M,W)
-    rho_derivative = derivative_wrt_rho(mu, phi, beta, M, W, X, Y, Z, MinvX=None, epsilon=epsilon)
+    rho_derivative = derivative_wrt_rho(mu, phi, beta, M, W, X, Y, MinvX=None, epsilon=epsilon)
 
     if Z is None:
         return (-1/n * np.concatenate([beta_grad.flatten(),[rho_derivative]]) + 2*regularization_lambda*x)
@@ -493,6 +464,8 @@ class dirichletRegressor:
         if fit_intercept:
             K+=1
             self.intercept = True
+        else:
+            self.intercept=False
         self.K, self.J = K, J
         
         if beta_0 is None:
@@ -565,6 +538,51 @@ class dirichletRegressor:
                 
         if verbose:
             print(solution.message)
+            
+            
+    def compute_hessian(self, X, Y, Z=None, W=None):
+        beta = np.zeros((self.K, self.J))
+        beta[:,1:] = self.beta
+        n = len(X)
+        if self.intercept:
+            X_f = np.ones((len(X),self.K))
+            X_f[:,1:] = X
+        else:
+            X_f = X
+        if self.spatial:
+            M = np.identity(n) - self.rho*W
+            mu = compute_mu_spatial(X_f, beta, M)
+        else:
+            mu = compute_mu(X_f, beta)
+
+        if hasattr(self,'gamma'):
+            phi = np.exp(np.matmul(Z,self.gamma))
+            K_gamma = len(self.gamma)
+            hess = np.zeros((self.K*self.J + K_gamma, self.K*self.J + K_gamma))
+            hess[:-K_gamma,:-K_gamma] = hessian_wrt_beta(mu, phi, X_f, Y).reshape((self.K*self.J,self.K*self.J))
+            hess[-K_gamma:,-K_gamma:] = hessian_wrt_gamma(mu, phi, beta, X_f, Y, Z)
+            der_beta_gamma = second_derivative_beta_gamma(mu, phi, beta, X_f, Y, Z).reshape((K_gamma,self.K*self.J))
+            hess[-K_gamma:,:-K_gamma] = der_beta_gamma
+            hess[:-K_gamma,-K_gamma:] = np.transpose(der_beta_gamma)
+        else:
+            phi = np.ones(n)
+            hess = hessian_wrt_beta(mu, phi, X_f, Y).reshape((self.K*self.J,self.K*self.J))
+            
+        if self.spatial:
+            hess_spatial = np.zeros((hess.shape[0]+1,hess.shape[1]+1))
+            hess_spatial[:-1,:-1] = hess
+            hess_spatial[-1,-1] = second_derivative_wrt_rho(mu, phi, beta, M, W, X_f, Y)
+            der_rho_beta = second_derivative_wrt_rho_beta(mu, phi, beta, M, W, X_f, Y).flatten()
+            hess_spatial[-1,:self.K*self.J] = der_rho_beta
+            hess_spatial[:self.K*self.J,-1] = der_rho_beta
+            if hasattr(self,'gamma'):
+                der_rho_gamma = second_derivative_wrt_rho_gamma(mu, phi, beta, M, W, X_f, Y, Z)
+                hess_spatial[-1,self.K*self.J:-1] = der_rho_gamma
+                hess_spatial[self.K*self.J:-1,-1] = der_rho_gamma
+            self.hess = hess_spatial
+        else:
+            self.hess = hess
+                
         
     def pred(self, X, W=None):
         beta = np.zeros((self.K, self.J))
@@ -572,6 +590,8 @@ class dirichletRegressor:
         if self.intercept:
             X_f = np.ones((len(X),self.K))
             X_f[:,1:] = X
+        else:
+            X_f = X
         if self.spatial:
             M = np.identity(X.shape[0]) - self.rho*W
             mu = compute_mu_spatial(X_f, beta, M)
