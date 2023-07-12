@@ -296,16 +296,70 @@ def second_derivative_wrt_rho_beta(mu, phi, beta, M, W, X, Y, MinvX=None, MinvXb
     return hessian
 
 
+def compute_gradient_spatial(mu, phi, beta, M, W, X, Y, Z=None):
+    K = X.shape[-1]
+    J = Y.shape[-1]
+    n = len(X)
+    
+    MinvX = np.linalg.solve(M,X)
+
+    if Z is None:
+        grad = gradient_wrt_beta(mu, phi, MinvX, Y)[:,1:].flatten()
+    else:
+        K_gamma = Z.shape[-1]
+        grad = np.zeros(K*(J-1)+K_gamma)
+        grad[:K*(J-1)] = gradient_wrt_beta(mu, phi, MinvX, Y)[:,1:].flatten()
+        grad[K*(J-1):] = gradient_wrt_gamma(mu, phi, Y, Z)
+
+    grad_spatial = np.zeros(len(grad)+1)
+    grad_spatial[:-1] = grad
+    grad_spatial[-1] = derivative_wrt_rho(mu, phi, beta, M, W, X, Y, MinvX)
+    return(grad_spatial)
+    
+def compute_hessian_spatial(mu, phi, beta, M, W, X, Y, Z=None):
+    K = X.shape[-1]
+    J = Y.shape[-1]
+    n = len(X)
+    
+    MinvX = np.linalg.solve(M,X)
+
+    if Z is None:
+        hess = hessian_wrt_beta(mu, phi, MinvX, Y)[:,1:,:,1:].reshape((K*(J-1),K*(J-1)))
+    else:
+        K_gamma = Z.shape[-1]
+        hess = np.zeros((K*(J-1) + K_gamma, K*(J-1) + K_gamma))
+        hess[:-K_gamma,:-K_gamma] = hessian_wrt_beta(mu, phi, MinvX, Y)[:,1:,:,1:].reshape((K*(J-1),K*(J-1)))
+        hess[-K_gamma:,-K_gamma:] = hessian_wrt_gamma(mu, phi, beta, MinvX, Y, Z)
+        der_beta_gamma = second_derivative_beta_gamma(mu, phi, beta, MinvX, Y, Z)[:,:,1:].reshape((K_gamma,K*(J-1)))
+        hess[-K_gamma:,:-K_gamma] = der_beta_gamma
+        hess[:-K_gamma,-K_gamma:] = np.transpose(der_beta_gamma)
+
+    hess_spatial = np.zeros((hess.shape[0]+1,hess.shape[1]+1))
+    hess_spatial[:-1,:-1] = hess
+    hess_spatial[-1,-1] = second_derivative_wrt_rho(mu, phi, beta, M, W, X, Y)
+    der_rho_beta = second_derivative_wrt_rho_beta(mu, phi, beta, M, W, X, Y)[:,1:].flatten()
+    hess_spatial[-1,:K*(J-1)] = der_rho_beta
+    hess_spatial[:K*(J-1),-1] = der_rho_beta
+    if not Z is None:
+        der_rho_gamma = second_derivative_wrt_rho_gamma(mu, phi, beta, M, W, X, Y, Z)
+        hess_spatial[-1,K*(J-1):-1] = der_rho_gamma
+        hess_spatial[K*(J-1):-1,-1] = der_rho_gamma
+        
+    return(hess_spatial)
+            
 ####################
 
-def crossentropy_no_spatial(x, X, Y, regularization_lambda=0, epsilon=0):
+def crossentropy_no_spatial(x, X, Y, regularization_lambda=0, epsilon=0, size_samples=None):
     K = X.shape[-1]
     J = Y.shape[-1]
     n = X.shape[0]
     beta = np.zeros((K,J))
     beta[:,1:] = x.reshape((K,J-1))
     mu = compute_mu(X, beta)
-    obj = - 1/n * np.sum(Y*np.log(mu+epsilon))
+    if size_samples is None:
+        obj = - 1/n * np.sum(Y*np.log(mu+epsilon))
+    else:
+        obj = -1/np.sum(size_samples) * np.sum( size_samples*np.sum(Y*np.log(mu+epsilon),axis=1) )
     if regularization_lambda!=0:
         obj = obj + regularization_lambda * np.linalg.norm(x)**2
     return obj
@@ -457,7 +511,7 @@ class dirichletRegressor:
         self.random_state = random_state
         self.spatial = spatial
         
-    def fit(self, X , Y, W=None, beta_0=None, rho_0=0, parametrization='common', gamma_0=None, Z=None, fit_intercept=True, regularization=0, verbose=True, loss='likelihood'):
+    def fit(self, X , Y, W=None, beta_0=None, rho_0=0, parametrization='common', gamma_0=None, Z=None, fit_intercept=True, regularization=0, verbose=True, loss='likelihood', size_samples=None):
         
         n,K = np.shape(X)
         J = Y.shape[1]
@@ -517,7 +571,10 @@ class dirichletRegressor:
         else: 
             if loss=='crossentropy':
                 params0 = beta_0.flatten()
-                solution = minimize(crossentropy_no_spatial, params0, args=(X_f, Y, regularization), jac = jac_crossentropy_no_spatial)
+                if size_samples is None:
+                    solution = minimize(crossentropy_no_spatial, params0, args=(X_f, Y, regularization), jac = jac_crossentropy_no_spatial)
+                else:
+                    solution = minimize(crossentropy_no_spatial, params0, args=(X_f, Y, regularization, 0, size_samples))
                 self.beta = solution.x.reshape((K,J-1))
             else:
                 if parametrization=='common':
