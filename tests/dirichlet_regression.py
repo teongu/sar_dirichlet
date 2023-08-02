@@ -48,7 +48,8 @@ def compute_mu_spatial(X, beta, M, Xbeta=None, MinvX=None, MXbeta=None):
         if MinvX is None:
             if Xbeta is None:
                 Xbeta = np.matmul(X,beta)
-            MXbeta = sparse.linalg.spsolve(sparse.csc_matrix(M),Xbeta)
+            #MXbeta = sparse.linalg.spsolve(sparse.csc_matrix(M),Xbeta)
+            MXbeta = np.linalg.solve(M,Xbeta)
         else:
             MXbeta = np.matmul(MinvX,beta)
     exp_MXbeta = np.exp(MXbeta - np.max(MXbeta, axis=1, keepdims=True))
@@ -378,7 +379,7 @@ def jac_crossentropy_no_spatial(x, X, Y, regularization_lambda=0, epsilon=0):
     return -1/n * grad[:,1:].flatten() + 2*regularization_lambda*x
 
 
-def crossentropy_spatial(x, X, Y, W, regularization_lambda=0, epsilon=0):
+def crossentropy_spatial(x, X, Y, W, regularization_lambda=0, epsilon=0, size_samples=None):
     K = X.shape[-1]
     J = Y.shape[-1]
     n = X.shape[0]
@@ -387,7 +388,10 @@ def crossentropy_spatial(x, X, Y, W, regularization_lambda=0, epsilon=0):
     rho = x[-1]
     M = np.identity(n) - rho*W
     mu = compute_mu_spatial(X, beta, M)
-    obj = - 1/n * np.sum(Y*np.log(mu+epsilon))
+    if size_samples is None:
+        obj = - 1/n * np.sum(Y*np.log(mu+epsilon))
+    else:
+        obj = -1/np.sum(size_samples) * np.sum( size_samples*np.sum(Y*np.log(mu+epsilon),axis=1) )
     if regularization_lambda!=0:
         obj = obj + regularization_lambda * np.linalg.norm(x)**2
     return obj
@@ -542,7 +546,11 @@ class dirichletRegressor:
                 min_bounds, max_bounds = -np.inf*np.ones(len(params0)), np.inf*np.ones(len(params0))
                 min_bounds[-1], max_bounds[-1] = -1, 1
                 bounds = Bounds(min_bounds, max_bounds)
-                solution = minimize(crossentropy_spatial, params0, args=(X_f, Y, W, regularization), bounds=bounds, jac = jac_crossentropy_spatial)
+                #solution = minimize(crossentropy_spatial, params0, args=(X_f, Y, W, regularization), bounds=bounds, jac = jac_crossentropy_spatial)
+                if size_samples is None:
+                    solution = minimize(crossentropy_spatial, params0, args=(X_f, Y, W, regularization), jac = jac_crossentropy_spatial)
+                else:
+                    solution = minimize(crossentropy_spatial, params0, args=(X_f, Y, W, regularization, 0, size_samples))
                 self.beta = solution.x[:-1].reshape((K,J-1))
             else:
                 if parametrization=='common':
@@ -595,6 +603,7 @@ class dirichletRegressor:
                 
         if verbose:
             print(solution.message)
+        #print(solution)
             
             
     def compute_hessian(self, X, Y, Z=None, W=None):
