@@ -1,5 +1,6 @@
 import numpy as np
 import scipy
+from sklearn.neighbors import NearestNeighbors
 
 
 def create_features_matrices(n_samples,n_features,choice_W='X_dependent',threshold_neighbors=0.3,nneighbors=5,cov_mat=None):
