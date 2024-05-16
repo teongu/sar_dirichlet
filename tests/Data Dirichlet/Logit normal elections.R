@@ -18,7 +18,8 @@ normalize <- function(x) {
 Y_occitanie <- read.csv("occitanie/Y_occitanie.csv", sep=";")
 X_occitanie <- read.csv("occitanie/X_occitanie_bis.csv", sep=";")
 X_occitanie <- X_occitanie[, -1]
-W_mat <- as.matrix(read.csv("occitanie/W_elections_5nn.csv", sep=" ", header=FALSE))
+#W_mat <- as.matrix(read.csv("occitanie/W_elections_5nn.csv", sep=" ", header=FALSE))
+W_mat <- as.matrix(read.csv("occitanie/W_elections_distance.csv", sep=",", header=FALSE))
 W <- mat2listw(W_mat, style="W")
 X_scaled <- as.data.frame(lapply(X_occitanie, normalize))
 
@@ -65,7 +66,7 @@ for (i in 1:ncol(Y_occitanie)) {
   mse_values[i] <- MSE(pred_final[, i], Y_occitanie[, i])
 }
 
-
+## contiguity with 5 neighbours
 # R2 = 0.4141665
 mean(diag(cor(pred_final, Y_occitanie) ^ 2))
 # RMSE = 0.1145348
@@ -73,5 +74,16 @@ sqrt(mean(mse_values))
 # cross-entropy = -1.075672
 sum(Y_occitanie * log(pred_final)) / n
 # cos similarity = 0.9511475
+cos_similarity(Y_occitanie, pred_final)
+# AIC ?
+
+## distance
+# R2 = 0.4342761
+mean(diag(cor(pred_final, Y_occitanie) ^ 2))
+# RMSE = 0.1162009
+sqrt(mean(mse_values))
+# cross-entropy = -1.076869
+sum(Y_occitanie * log(pred_final)) / n
+# cos similarity = 0.9497338
 cos_similarity(Y_occitanie, pred_final)
 # AIC ?

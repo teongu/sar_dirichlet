@@ -479,7 +479,9 @@ def objective_func_loglik_spatial(x, X, Y, W, Z=None, phi=None, regularization_l
         D_inv = np.zeros(In.shape)
         np.fill_diagonal(D_inv, 1/np.real(In-rho*D).diagonal())
         MinvX = np.real(np.matmul(np.matmul(P, D_inv), P_inv_X))
-    mu = compute_mu_spatial(X, beta, M, MinvX = MinvX)
+        mu = compute_mu_spatial(X, beta, M, MinvX = MinvX)
+    else:
+        mu = compute_mu_spatial(X, beta, M)
     obj = - 1/n * dirichlet_loglikelihood(mu,phi,Y,epsilon=epsilon)
     if regularization_lambda!=0:
         obj = obj + regularization_lambda * np.linalg.norm(x)**2
@@ -570,9 +572,10 @@ class dirichletRegressor:
                 self.beta = solution.x[:-1].reshape((K,J-1))
             else:
                 P, D = diagonalize(W)
+                W_is_diagonalizable = False
                 if np.count_nonzero(D - np.diag(np.diagonal(D)))==0:
                     W_is_diagonalizable = True
-                    P_inv_X = np.linalg.solve(P, X)
+                    P_inv_X = np.linalg.solve(P, X_f)
                 if parametrization=='common':
                     #common parametrization
                     params0 = np.concatenate([beta_0.flatten(),[rho_0]])
