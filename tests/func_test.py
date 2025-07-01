@@ -46,3 +46,42 @@ def cos_similarity(x1,x2):
     float: The mean cosine similarity between rows of x1 and x2.
     """
     return(np.mean([np.dot(x1[i],x2[i])/(np.linalg.norm(x1[i])*np.linalg.norm(x2[i])) for i in range(len(x1))]))
+
+
+
+def rmse_aitchison(x1, x2):
+    """
+    Compute the mean RMSE under Aitchison geometry between rows of matrices x1 and x2.
+    
+    Parameters:
+    x1 (numpy.ndarray): The first matrix of shape (n, m).
+    x2 (numpy.ndarray): The second matrix of shape (n, m), where n is the number of rows
+                        and m is the number of features (columns).
+    
+    Returns:
+    float: The mean RMSE_A across all rows.
+    """
+    x1 = np.asarray(x1)
+    x2 = np.asarray(x2)
+
+    if x1.shape != x2.shape:
+        raise ValueError("x1 and x2 must have the same shape.")
+    if np.any(x1 <= 0) or np.any(x2 <= 0):
+        raise ValueError("All components must be strictly positive.")
+
+    n, D = x1.shape
+    log_x1 = np.log(x1)
+    log_x2 = np.log(x2)
+
+    # Compute log-ratio matrices: log(x_i) - log(x_j) for each row
+    diff_x1 = log_x1[:, :, None] - log_x1[:, None, :]
+    diff_x2 = log_x2[:, :, None] - log_x2[:, None, :]
+    
+    # Difference of differences: shape (n, D, D)
+    delta = diff_x1 - diff_x2
+    squared = delta ** 2
+
+    # Sum over i and j (axes 1 and 2), then average over rows
+    row_rmse = np.sqrt(np.sum(squared, axis=(1, 2)) / (2 * D))
+    return np.mean(row_rmse)
+
