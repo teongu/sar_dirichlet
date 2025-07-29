@@ -16,6 +16,18 @@ Y <- read.csv("maupiti_Y.csv", sep=",", header=FALSE)
 W_mat <- as.matrix(read.csv("maupiti_W_no_zeros.csv", sep=",", header=FALSE))
 W <- mat2listw(W_mat, style="W")
 
+for (i in 1:2301){
+  unique_values <- unique(W_mat[i,])
+  if (length(unique_values)==1){
+    if (unique_values==1){
+      W_mat[i,] <- W_mat[i,]/2301
+    }
+  }
+}
+
+
+W <- mat2listw(W_mat, style="W")
+
 # we drop columns because of aliased variables error
 #X_scaled <- subset(X_scaled, select = -c(`age_65`, `foreign`))
 
@@ -52,6 +64,34 @@ cos_similarity <- function(x1, x2) {
   }))
 }
 
+
+rmse_aitchison <- function(x1, x2) {
+  n <- nrow(x1)
+  D <- ncol(x1)
+  
+  log_x1 <- log(x1)
+  log_x2 <- log(x2)
+  
+  row_rmse <- numeric(n)
+  
+  for (i in 1:n) {
+    # Log-ratio matrices for row i
+    v1 <- as.numeric(log_x1[i, ])
+    v2 <- as.numeric(log_x2[i, ])
+    
+    diff1 <- outer(v1, v1, "-")
+    diff2 <- outer(v2, v2, "-")
+    
+    delta <- diff1 - diff2
+    squared <- delta^2
+    row_rmse[i] <- sqrt(sum(squared) / (2 * D))
+  }
+  
+  return(mean(row_rmse))
+}
+
+
+
 n = 2301
 
 mse_values <- numeric()
@@ -61,12 +101,16 @@ for (i in 1:ncol(Y)) {
 }
 
 
-# R2 = 0.4147603
+# R2 = 0.4200099
 mean(diag(cor(pred_final, Y) ^ 2))
-# RMSE = 0.3003778
+# RMSE = 0.2984037
 sqrt(mean(mse_values))
-# cross-entropy = -1.667296
+# cross-entropy = -1.125738
 sum(Y * log(pred_final)) / n
-# cos similarity = 0.8031862
+# cos similarity = 0.804215
 cos_similarity(Y, pred_final)
+# RMSE_A = 6.590471
+rmse_aitchison(pred_final, Y)
 # AIC ?
+pred_final[pred_final < 10e-05] <- 10e-05
+rmse_aitchison(pred_final, Y) # RMSE_A = 4.328031

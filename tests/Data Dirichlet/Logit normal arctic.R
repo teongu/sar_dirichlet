@@ -3,6 +3,8 @@ library(spdep)
 library(spatialreg)
 library(MLmetrics)
 
+setwd('C:/Users/tnguyen001/Documents/GitHub/sar_dirichlet/tests/Data Dirichlet')
+
 lr <- function(x) {
   log(x / rowMeans(x))
 }
@@ -15,8 +17,8 @@ lr_inv <- function(x) {
 data_arctic <- read_csv("ArcticLake.csv")
 X <- as.data.frame(data_arctic$depth)
 Y <- as.data.frame(data_arctic[, c('sand', 'silt', 'clay')])
-W_mat <- as.matrix(read_csv("W_arctic_cont.csv"))
-#W_mat <- as.matrix(read_csv("W_arctic_dist.csv"))
+#W_mat <- as.matrix(read_csv("W_arctic_cont.csv"))
+W_mat <- as.matrix(read_csv("W_arctic_dist.csv"))
 W <- mat2listw(W_mat, style="W")
 data_arctic$depth_scaled <- (data_arctic$depth-mean(data_arctic$depth))/sd(data_arctic$depth)
 data_arctic$depth_scaled_square <- data_arctic$depth_scaled**2
@@ -34,11 +36,38 @@ cos_similarity <- function(x1, x2) {
   }))
 }
 
+rmse_aitchison <- function(x1, x2) {
+  n <- nrow(x1)
+  D <- ncol(x1)
+  
+  log_x1 <- log(x1)
+  log_x2 <- log(x2)
+  
+  row_rmse <- numeric(n)
+  
+  for (i in 1:n) {
+    # Log-ratio matrices for row i
+    v1 <- as.numeric(log_x1[i, ])
+    v2 <- as.numeric(log_x2[i, ])
+    
+    diff1 <- outer(v1, v1, "-")
+    diff2 <- outer(v2, v2, "-")
+    
+    delta <- diff1 - diff2
+    squared <- delta^2
+    row_rmse[i] <- sqrt(sum(squared) / (2 * D))
+  }
+  
+  return(mean(row_rmse))
+}
+
+
 list_pred <- matrix(nrow = 0, ncol = 3)
 list_r2 <- cbind()
 list_rmse <- cbind()
 list_crossentropy <- cbind()
 list_similarity <- cbind()
+list_rmse_a <- cbind()
 # Iterate over each row index
 for (i in 1:nrow(data_arctic)) {
   # Exclude the i-th row
@@ -71,6 +100,7 @@ for (i in 1:nrow(data_arctic)) {
   list_rmse <- rbind(list_rmse, mean(as.numeric((pred_i - Y[i,])^2)))
   list_crossentropy <- rbind(list_crossentropy, sum(Y[i,] * log(pred_i)))
   list_similarity <- rbind(list_similarity, cos_similarity(Y[i,], pred_i))
+  list_rmse_a <- rbind(list_rmse_a, rmse_aitchison(Y[i,], pred_i))
 }
 
 
@@ -89,6 +119,9 @@ sqrt(var(list_crossentropy))
 # cos similarity = 0.8823345 (0.09866024)
 mean(list_similarity)
 sqrt(var(list_similarity))
+# RMSE_A = 1.407812 (0.6986515))
+mean(list_rmse_a)
+sqrt(var(list_rmse_a))
 
 ## Distance
 # R2 = 0.5978643 (0.2779165)
@@ -103,6 +136,9 @@ sqrt(var(list_crossentropy))
 # cos similarity = 0.8739645 (0.08113203)
 mean(list_similarity)
 sqrt(var(list_similarity))
+# RMSE_A = 1.517462 (0.6786377)
+mean(list_rmse_a)
+sqrt(var(list_rmse_a))
 
 
 ### ORDER 2 ###
@@ -120,6 +156,9 @@ sqrt(var(list_crossentropy))
 # cos similarity = 0.8891295 (0.09781993)
 mean(list_similarity)
 sqrt(var(list_similarity))
+# RMSE_A = 1.403279 (0.7187483))
+mean(list_rmse_a)
+sqrt(var(list_rmse_a))
 
 ## Distance
 # R2 = 0.7290594 (0.2707709)
@@ -134,4 +173,54 @@ sqrt(var(list_crossentropy))
 # cos similarity = 0.8895072 (0.116246)
 mean(list_similarity)
 sqrt(var(list_similarity))
+# RMSE_A = 1.2877 (0.7300942))
+mean(list_rmse_a)
+sqrt(var(list_rmse_a))
 
+
+
+# Adjusted R squared for Dirichlet
+n = 39
+k = 5 #order 1, non-spatial
+k = 6 #order 1, spatial
+k = 7 #order 2, non-spatial
+k = 8 #order 2, spatial
+R = 0.686
+a = (n-1)/(n-k)
+1 - (1-R)*a
+stdR = 0.015
+stdR*a
+
+# Adjusted R squared for multinomial
+n = 39
+k = 4 #order 1, non-spatial
+k = 5 #order 1, spatial
+k = 6 #order 2, non-spatial
+k = 7 #order 2, spatial
+R = 0.705
+a = (n-1)/(n-k)
+1 - (1-R)*a
+stdR = 0.016
+stdR*a
+
+# Adjusted R squared for logit normal
+n = 39
+k = 3 #order 1, spatial
+k = 4 #order 2, spatial
+R = 0.730
+a = (n-1)/(n-k)
+1 - (1-R)*a
+stdR = 0.271
+stdR*a
+
+
+
+# Adjusted Rsquared for the synthetic datasets
+n = 1000
+k = 6 #non-spatial
+k = 7 #spatial
+R = 0.9991
+a = (n-1)/(n-k)
+1 - (1-R)*a
+stdR = 0.0027
+stdR*a
