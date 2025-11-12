@@ -5,6 +5,7 @@ from scipy.special import gamma, digamma, polygamma, loggamma
 from sklearn.neighbors import NearestNeighbors
 from scipy import sparse
 from scipy.optimize import minimize, Bounds
+import scipy.stats as st
 
 
 
@@ -49,7 +50,10 @@ def compute_mu_spatial(X, beta, M, Xbeta=None, MinvX=None, MXbeta=None):
             if Xbeta is None:
                 Xbeta = np.matmul(X,beta)
             #MXbeta = sparse.linalg.spsolve(sparse.csc_matrix(M),Xbeta)
-            MXbeta = np.linalg.solve(M,Xbeta)
+            try: 
+                MXbeta = np.linalg.solve(M,Xbeta)
+            except np.linalg.LinAlgError:
+                MXbeta, _, _, _ = np.linalg.lstsq(M, Xbeta, rcond=None)
         else:
             MXbeta = np.matmul(MinvX,beta)
     exp_MXbeta = np.exp(MXbeta - np.max(MXbeta, axis=1, keepdims=True))
@@ -144,7 +148,7 @@ def hessian_wrt_gamma(mu, phi, beta, X, Y, Z, epsilon=0):
     return(hessian)
 
 
-def hessian_wrt_beta(mu, phi, X, Y, alpha=None, epsilon=0):
+def hessian_wrt_beta_old(mu, phi, X, Y, alpha=None, epsilon=0):
     K = np.shape(X)[1] #nb of features
     J = np.shape(Y)[1] #nb of classes
     n = np.shape(Y)[0] 
@@ -191,6 +195,93 @@ def hessian_wrt_beta(mu, phi, X, Y, alpha=None, epsilon=0):
 
     return hessian
 
+
+def hessian_wrt_beta(mu, phi, X, Y, alpha=None, epsilon=0.0):
+    n, J = Y.shape
+    K = X.shape[1]
+    if alpha is None:
+        alpha = mu * phi[:, None]   # shape (n,J)
+
+    hessian = np.zeros((K, J, K, J))
+
+    for i in range(n):
+        yi = Y[i] + epsilon
+        mui = mu[i]          # shape (J,)
+        phii = phi[i]        # scalar
+        alphai = alpha[i]    # shape (J,)
+
+        psi_alpha = digamma(alphai)   
+        psi1_alpha = polygamma(1, alphai)   
+        sum_mu_psi_plus_alpha_psi1 = np.sum(mui * (psi_alpha + alphai * psi1_alpha))
+        sum_mu_logy = np.sum(mui * np.log(yi))
+        sum_mu_psi_minus_logy = np.sum(mui * (psi_alpha - np.log(yi)))
+
+        # for convenience, compute per-class scalars used below
+        # alpha_times_trigamma = alpha_ij * psi1(alpha_ij)
+        alpha_times_trigamma = alphai * psi1_alpha   # shape (J,)
+
+        for p in range(K):
+            Xip = X[i, p]
+            for q in range(K):
+                Xiq = X[i, q]
+                # we will fill for all c,d
+                for d in range(J):
+                    for c in range(J):
+                        # common factor outside parentheses
+                        common = phii * Xip * Xiq * mui[d] * mui[c]
+
+                        if c != d:
+                            # Use the expression in Appendix A (case c != d)
+                            # S1 := ψ(α_ic) + α_ic ψ1(α_ic) - sum_j µ_ij (ψ(α_ij) + α_ij ψ1(α_ij))
+                            S1 = psi_alpha[c] + alpha_times_trigamma[c] - sum_mu_psi_plus_alpha_psi1
+                            # S2 := - ln(y_ic) + sum_j µ_ij ln(y_ij)
+                            S2 = -np.log(yi[c]) + sum_mu_logy
+                            # S3 := + α_id ψ1(α_id)  (note alpha_times_trigamma[d])
+                            S3 = alpha_times_trigamma[d]
+                            # Second bracket (to subtract):
+                            # T := ∑_j µ_ij (ψ(α_ij) - ln(y_ij)) - ψ(α_id) + ln(y_id)
+                            T = sum_mu_psi_minus_logy - psi_alpha[d] + np.log(yi[d])
+
+                            hessian[p, d, q, c] += common * (S1 + S2 + S3 - T)
+
+                        else:
+                            # c == d case: use A.10 (paper) (it has different combination, including some 2* terms)
+                            # I'll implement the form given in A.10: (check the paper for exact grouping)
+                            # First chunk (with µ_ic^2 term factor inside): see A.10
+                            # We'll implement directly the expression provided in Appendix A (A.10).
+                            # Following the paper, one convenient decomposition is:
+                            #
+                            # TermA = phii * Xip * Xiq * mui[c]**2 * (
+                            #       2*ψ(α_ic) + 2*α_ic ψ1(α_ic)
+                            #       - 2*sum_j µ_ij ψ(α_ij) - phii * sum_j µ_ij**2 ψ1(α_ij)
+                            #       - 2*ln(y_ic) + 2*sum_j µ_ij ln(y_ij) - phii * ψ1(α_ic)
+                            # )
+                            #
+                            # TermB = phii * Xip * Xiq * mui[c] * (
+                            #       sum_j µ_ij (ψ(α_ij) - ln(y_ij)) - ψ(α_ic) + ln(y_ic)
+                            # )
+                            #
+                            # Total = TermA + TermB
+                            #
+                            # (This mirrors equation A.10 in the manuscript.)
+                            mui_c = mui[c]
+                            termA_inner = (
+                                2.0 * psi_alpha[c]
+                                + 2.0 * alpha_times_trigamma[c]
+                                - 2.0 * np.sum(mui * psi_alpha)
+                                - phii * np.sum(mui**2 * psi1_alpha)
+                                - 2.0 * np.log(yi[c])
+                                + 2.0 * sum_mu_logy
+                                - phii * psi1_alpha[c]
+                            )
+                            TermA = phii * Xip * Xiq * (mui_c**2) * termA_inner
+
+                            termB_inner = (np.sum(mui * (psi_alpha - np.log(yi))) - psi_alpha[c] + np.log(yi[c]))
+                            TermB = phii * Xip * Xiq * mui_c * termB_inner
+
+                            hessian[p, d, q, c] += TermA + TermB
+
+    return hessian
 
 
 def second_derivative_beta_gamma(mu, phi, beta, X, Y, Z, epsilon=0):
@@ -431,6 +522,7 @@ def objective_func_loglik_no_spatial(x, X, Y, Z=None, phi=None, regularization_l
         beta[:,1:] = x.reshape((K,J-1))
     mu = compute_mu(X, beta)
     obj = - 1/n * dirichlet_loglikelihood(mu,phi,Y,epsilon=epsilon)
+    #obj = - dirichlet_loglikelihood(mu,phi,Y,epsilon=epsilon)
     if regularization_lambda!=0:
         obj = obj + regularization_lambda * np.linalg.norm(x)**2
     return obj
@@ -552,7 +644,7 @@ class dirichletRegressor:
                 else:
                     solution = minimize(crossentropy_spatial, params0, args=(X_f, Y, W, regularization, 0, size_samples))
                 self.beta = solution.x[:-1].reshape((K,J-1))
-            else:
+            else: # dirichlet model
                 if parametrization=='common':
                     params0 = np.concatenate([beta_0.flatten(),[rho_0]])
                     min_bounds, max_bounds = -np.inf*np.ones(len(params0)), np.inf*np.ones(len(params0))
@@ -561,22 +653,24 @@ class dirichletRegressor:
                     solution = minimize(objective_func_loglik_spatial, params0, args=(X_f, Y, W, None, self.phi, regularization), bounds=bounds, options={'maxiter':self.maxiter, 'maxfun':self.maxfun})
                     self.beta = solution.x[:-1].reshape((K,J-1))
 
-                else:
+                else: # alternative parametrization
                     params0 = np.concatenate([beta_0.flatten(),gamma_0,[rho_0]])
                     min_bounds, max_bounds = -np.inf*np.ones(len(params0)), np.inf*np.ones(len(params0))
                     min_bounds[-1], max_bounds[-1] = -1, 1
                     bounds = Bounds(min_bounds, max_bounds)
                     solution = minimize(objective_func_loglik_spatial, params0, args=(X_f, Y, W, Z, None, regularization), bounds=bounds, options={'maxiter':self.maxiter, 'maxfun':self.maxfun})
+                    #solution = minimize(objective_func_loglik_spatial, params0, args=(X_f, Y, W, Z, None, regularization), options={'maxiter':self.maxiter, 'maxfun':self.maxfun}, jac = jac_objective_func_loglik_spatial)
                     self.beta = solution.x[:K*(J-1)].reshape((K,J-1))
                     self.gamma = solution.x[K*(J-1):-1]
                     self.phi = np.exp(np.matmul(Z,self.gamma))
+            #self.rho = np.tanh(solution.x[-1])
             self.rho = solution.x[-1]
             beta = np.zeros((K, J))
             beta[:,1:] = self.beta
             M = np.identity(n) - self.rho*W
             self.mu = compute_mu_spatial(X_f, beta, M)
             
-        else: 
+        else:  # non-spatial model
             if loss=='crossentropy':
                 params0 = beta_0.flatten()
                 if size_samples is None:
@@ -584,13 +678,13 @@ class dirichletRegressor:
                 else:
                     solution = minimize(crossentropy_no_spatial, params0, args=(X_f, Y, regularization, 0, size_samples))
                 self.beta = solution.x.reshape((K,J-1))
-            else:
+            else: # dirichlet model
                 if parametrization=='common':
                     params0 = beta_0.flatten()
                     #solution = minimize(objective_func_loglik_no_spatial, params0, args=(X_f,Y,None,self.phi,regularization))
                     solution = minimize(objective_func_loglik_no_spatial, params0, args=(X_f,Y,None,self.phi,regularization), jac = jac_objective_func_loglik_no_spatial)
                     self.beta = solution.x.reshape((K,J-1))
-                else:
+                else: # alternative parametrization
                     params0 = np.concatenate([beta_0.flatten(),gamma_0])
                     solution = minimize(objective_func_loglik_no_spatial, params0, args=(X_f,Y,Z,None,regularization), jac = jac_objective_func_loglik_no_spatial)
                     self.beta = solution.x[:K*(J-1)].reshape((K,J-1))
@@ -647,7 +741,57 @@ class dirichletRegressor:
                 hess_spatial[self.K*self.J:-1,-1] = der_rho_gamma
             self.hess = hess_spatial
         else:
-            self.hess = hess
+            self.hess = hess 
+            
+        J = self.J
+        K = self.K
+        baseline_col = 0 #baseline_col is the first column, where all betas are set to 0
+        baseline_idx = []
+        baseline_idx.extend([p * J + baseline_col for p in range(K)])
+
+        beta_size = K * J
+        # build list of indices to keep from the full Hessian
+        keep_idx = [i for i in range(beta_size) if i not in baseline_idx]
+
+        if hasattr(self, "gamma"):
+            K_gamma = len(self.gamma)
+            keep_idx += list(range(beta_size, beta_size + K_gamma))
+        if self.spatial:
+            keep_idx += [self.hess.shape[0] - 1]
+
+        # reduce Hessian to identifiable parameters only
+        self.hess = self.hess[np.ix_(keep_idx, keep_idx)]
+
+        
+    def inference(self, X, Y, Z=None, W=None, display=False):
+        if not hasattr(self,'hess'):
+            self.compute_hessian(X, Y, Z, W)
+        if not hasattr(self,'cov'):
+            self.cov = np.linalg.pinv(-self.hess)
+        self.se = np.sqrt(np.diag(self.cov))
+        pvalues_list = []
+        if self.spatial:
+            list_parameters = np.concatenate((self.beta.flatten(), self.gamma, [self.rho]))
+        else:
+            list_parameters = np.concatenate((self.beta.flatten(), self.gamma))
+        for i in range(len(list_parameters)) :
+            z = list_parameters[i] / self.se[i]
+            pvalues_list.append( 2*( 1-st.norm.cdf(abs(z)) ) )
+        self.pvalues = pvalues_list
+        if display:
+            parameters_name = []
+            for i in range(self.beta.shape[0]):
+                for j in range(self.beta.shape[1]):
+                    parameters_name.append("beta_"+str(i+1)+str(j+1))
+            if hasattr(self,'gamma'):
+                for i in range(len(self.gamma)):
+                    parameters_name.append("gamma_"+str(i+1))
+            if self.spatial:
+                parameters_name.append("rho")
+            for i in range(len(list_parameters)):
+                print("-----")
+                print(f"Estimated parameter {parameters_name[i]} = {np.round(list_parameters[i],2)}, se = {np.round(self.se[i],2)}, CI 95% = [{np.round(list_parameters[i]-1.96*self.se[i],2)} ; {np.round(list_parameters[i]+1.96*self.se[i],2)}],  p-value = {np.round(self.pvalues[i],2)}")
+            
                 
         
     def pred(self, X, W=None):
