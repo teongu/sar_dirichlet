@@ -712,6 +712,7 @@ class dirichletRegressor:
         if self.spatial:
             M = np.identity(n) - self.rho*W
             mu = compute_mu_spatial(X_f, beta, M)
+            X_tilde = np.linalg.solve(M, X_f)
         else:
             mu = compute_mu(X_f, beta)
 
@@ -719,14 +720,21 @@ class dirichletRegressor:
             phi = np.exp(np.matmul(Z,self.gamma))
             K_gamma = len(self.gamma)
             hess = np.zeros((self.K*self.J + K_gamma, self.K*self.J + K_gamma))
-            hess[:-K_gamma,:-K_gamma] = hessian_wrt_beta(mu, phi, X_f, Y).reshape((self.K*self.J,self.K*self.J))
+            if self.spatial:
+                hess[:-K_gamma,:-K_gamma] = hessian_wrt_beta(mu, phi, X_tilde, Y).reshape((self.K*self.J,self.K*self.J))
+                der_beta_gamma = second_derivative_beta_gamma(mu, phi, beta, X_tilde, Y, Z).reshape((K_gamma,self.K*self.J))
+            else:
+                hess[:-K_gamma,:-K_gamma] = hessian_wrt_beta(mu, phi, X_f, Y).reshape((self.K*self.J,self.K*self.J))
+                der_beta_gamma = second_derivative_beta_gamma(mu, phi, beta, X_f, Y, Z).reshape((K_gamma,self.K*self.J))
             hess[-K_gamma:,-K_gamma:] = hessian_wrt_gamma(mu, phi, beta, X_f, Y, Z)
-            der_beta_gamma = second_derivative_beta_gamma(mu, phi, beta, X_f, Y, Z).reshape((K_gamma,self.K*self.J))
             hess[-K_gamma:,:-K_gamma] = der_beta_gamma
             hess[:-K_gamma,-K_gamma:] = np.transpose(der_beta_gamma)
         else:
             phi = np.ones(n)
-            hess = hessian_wrt_beta(mu, phi, X_f, Y).reshape((self.K*self.J,self.K*self.J))
+            if self.spatial:
+                hess = hessian_wrt_beta(mu, phi, X_tilde, Y).reshape((self.K*self.J,self.K*self.J))
+            else:
+                hess = hessian_wrt_beta(mu, phi, X_f, Y).reshape((self.K*self.J,self.K*self.J))
             
         if self.spatial:
             hess_spatial = np.zeros((hess.shape[0]+1,hess.shape[1]+1))
@@ -790,7 +798,7 @@ class dirichletRegressor:
                 parameters_name.append("rho")
             for i in range(len(list_parameters)):
                 print("-----")
-                print(f"Estimated parameter {parameters_name[i]} = {np.round(list_parameters[i],2)}, se = {np.round(self.se[i],2)}, CI 95% = [{np.round(list_parameters[i]-1.96*self.se[i],2)} ; {np.round(list_parameters[i]+1.96*self.se[i],2)}],  p-value = {np.round(self.pvalues[i],2)}")
+                print(f"Estimated parameter {parameters_name[i]} = {np.round(list_parameters[i],4)}, se = {np.round(self.se[i],4)}, CI 95% = [{np.round(list_parameters[i]-1.96*self.se[i],4)} ; {np.round(list_parameters[i]+1.96*self.se[i],4)}],  p-value = {np.round(self.pvalues[i],4)}")
             
                 
         
