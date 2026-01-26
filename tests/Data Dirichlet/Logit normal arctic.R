@@ -18,7 +18,10 @@ data_arctic <- read_csv("ArcticLake.csv")
 X <- as.data.frame(data_arctic$depth)
 Y <- as.data.frame(data_arctic[, c('sand', 'silt', 'clay')])
 #W_mat <- as.matrix(read_csv("W_arctic_cont.csv"))
-W_mat <- as.matrix(read_csv("W_arctic_dist.csv"))
+#W_mat <- as.matrix(read_csv("W_arctic_dist.csv"))
+
+W_mat <- as.matrix(read_csv("W_arctic_cont_20.csv"))
+#W_mat <- as.matrix(read_csv("W_arctic_dist_15.csv"))
 W <- mat2listw(W_mat, style="W")
 data_arctic$depth_scaled <- (data_arctic$depth-mean(data_arctic$depth))/sd(data_arctic$depth)
 data_arctic$depth_scaled_square <- data_arctic$depth_scaled**2
@@ -75,13 +78,13 @@ for (i in 1:nrow(data_arctic)) {
   W_mat_training <- W_mat[-i, -i]
   training_W <- mat2listw(W_mat_training, style="W")
   
-  mod1 <- lagsarlm(sand_lr ~ depth_scaled, data=training_data, listw=training_W)
-  mod2 <- lagsarlm(silt_lr ~ depth_scaled, data=training_data, listw=training_W)
-  mod3 <- lagsarlm(clay_lr ~ depth_scaled, data=training_data, listw=training_W)
+  #mod1 <- lagsarlm(sand_lr ~ depth_scaled, data=training_data, listw=training_W)
+  #mod2 <- lagsarlm(silt_lr ~ depth_scaled, data=training_data, listw=training_W)
+  #mod3 <- lagsarlm(clay_lr ~ depth_scaled, data=training_data, listw=training_W)
   
-  #mod1 <- lagsarlm(sand_lr ~ depth_scaled + depth_scaled_square, data=training_data, listw=training_W)
-  #mod2 <- lagsarlm(silt_lr ~ depth_scaled + depth_scaled_square, data=training_data, listw=training_W)
-  #mod3 <- lagsarlm(clay_lr ~ depth_scaled + depth_scaled_square, data=training_data, listw=training_W)
+  mod1 <- lagsarlm(sand_lr ~ depth_scaled + depth_scaled_square, data=training_data, listw=training_W)
+  mod2 <- lagsarlm(silt_lr ~ depth_scaled + depth_scaled_square, data=training_data, listw=training_W)
+  mod3 <- lagsarlm(clay_lr ~ depth_scaled + depth_scaled_square, data=training_data, listw=training_W)
   
   Xbeta1 <- mod1$coefficients[1]*data_arctic$depth_scaled
   Xbeta2 <- mod2$coefficients[1]*data_arctic$depth_scaled
@@ -102,6 +105,79 @@ for (i in 1:nrow(data_arctic)) {
   list_similarity <- rbind(list_similarity, cos_similarity(Y[i,], pred_i))
   list_rmse_a <- rbind(list_rmse_a, rmse_aitchison(Y[i,], pred_i))
 }
+
+
+
+
+### ORDER 1 ###
+
+## Contiguity
+# R2 = 0.6728408 (0.2677946)
+mean(list_r2)
+sqrt(var(list_r2))
+# cross-entropy = -1.072055 (0.1587036)
+mean(list_crossentropy)
+sqrt(var(list_crossentropy))
+# cos similarity = 0.8822487 (0.09681309)
+mean(list_similarity)
+sqrt(var(list_similarity))
+# RMSE_A = 1.418186 (0.6872034)
+mean(list_rmse_a)
+sqrt(var(list_rmse_a))
+
+
+## Distance
+# R2 = 0.5911055 (0.2779419)
+mean(list_r2)
+sqrt(var(list_r2))
+# cross-entropy = -1.092532 (0.133295)
+mean(list_crossentropy)
+sqrt(var(list_crossentropy))
+# cos similarity = 0.8720323 (0.08223744)
+mean(list_similarity)
+sqrt(var(list_similarity))
+# RMSE_A = 1.51954 (0.6826123)
+mean(list_rmse_a)
+sqrt(var(list_rmse_a))
+
+
+
+
+### ORDER 2 ###
+
+## Contiguity
+# R2 = 0.7465961 (0.2715427)
+mean(list_r2)
+sqrt(var(list_r2))
+# cross-entropy = -1.065231 (0.214253)
+mean(list_crossentropy)
+sqrt(var(list_crossentropy))
+# cos similarity = 0.8904019 (0.1217014)
+mean(list_similarity)
+sqrt(var(list_similarity))
+# RMSE_A = 1.264805 (0.7310202)
+mean(list_rmse_a)
+sqrt(var(list_rmse_a))
+
+
+## Distance
+# R2 =0.7327463 (0.2709927)
+mean(list_r2)
+sqrt(var(list_r2))
+# cross-entropy = -1.058003 (0.1948226)
+mean(list_crossentropy)
+sqrt(var(list_crossentropy))
+# cos similarity = 0.8899549 (0.1170117)
+mean(list_similarity)
+sqrt(var(list_similarity))
+# RMSE_A = 1.284566 (0.7297966)
+mean(list_rmse_a)
+sqrt(var(list_rmse_a))
+
+
+
+##### WITH OLD SPATIAL MATRICES #####
+
 
 
 ### ORDER 1 ###
@@ -185,7 +261,7 @@ k = 5 #order 1, non-spatial
 k = 6 #order 1, spatial
 k = 7 #order 2, non-spatial
 k = 8 #order 2, spatial
-R = 0.686
+R = 0.678
 a = (n-1)/(n-k)
 1 - (1-R)*a
 stdR = 0.015
@@ -207,7 +283,7 @@ stdR*a
 n = 39
 k = 3 #order 1, spatial
 k = 4 #order 2, spatial
-R = 0.730
+R = 0.733
 a = (n-1)/(n-k)
 1 - (1-R)*a
 stdR = 0.271

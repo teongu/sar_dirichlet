@@ -93,6 +93,7 @@ rmse_aitchison <- function(x1, x2) {
 
 
 n = 2301
+k = 4 * 16 + 1
 
 mse_values <- numeric()
 for (i in 1:ncol(Y)) {
@@ -100,9 +101,10 @@ for (i in 1:ncol(Y)) {
   mse_values[i] <- MSE(pred_final[, i], Y[, i])
 }
 
-
 # R2 = 0.4200099
 mean(diag(cor(pred_final, Y) ^ 2))
+# Adjusted R2 = 0.4034091
+1 - (1-0.4200099) * (n-1)/(n-k)
 # RMSE = 0.2984037
 sqrt(mean(mse_values))
 # cross-entropy = -1.125738
