@@ -18,8 +18,8 @@ normalize <- function(x) {
 Y_occitanie <- read.csv("occitanie/Y_occitanie.csv", sep=";")
 X_occitanie <- read.csv("occitanie/X_occitanie_final.csv", sep=",")
 
-W_mat <- as.matrix(read.csv("occitanie/W_elections_5nn.csv", sep=" ", header=FALSE))
-#W_mat <- as.matrix(read.csv("occitanie/W_elections_distance.csv", sep=",", header=FALSE))
+#W_mat <- as.matrix(read.csv("occitanie/W_elections_5nn.csv", sep=" ", header=FALSE))
+W_mat <- as.matrix(read.csv("occitanie/W_elections_distance.csv", sep=",", header=FALSE))
 W <- mat2listw(W_mat, style="W")
 #X_scaled <- as.data.frame(lapply(X_occitanie, normalize))
 X_scaled <- as.data.frame(X_occitanie)
@@ -112,7 +112,10 @@ cos_similarity(Y_occitanie, pred_final)
 # RMSE_A = 0.4316181
 rmse_aitchison(pred_final, Y_occitanie)
 
-
+# R2 aitchison = 0.1976577
+r2_aitchison_adjusted(Y_occitanie, pred_final, n_params = k)
+# cosine aitchison = 0.702589
+cosine_similarity_aitchison(Y_occitanie, pred_final)
 
 ##### RESULTS FOR DISTANCE #####
 
@@ -129,7 +132,10 @@ cos_similarity(Y_occitanie, pred_final)
 # RMSE_A = 0.4218979
 rmse_aitchison(pred_final, Y_occitanie)
 
-
+# R2 aitchison = 0.2240667
+r2_aitchison_adjusted(Y_occitanie, pred_final, n_params = k)
+# cosine aitchison = 0.7105325
+cosine_similarity_aitchison(Y_occitanie, pred_final)
 
 
 

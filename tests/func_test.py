@@ -85,3 +85,181 @@ def rmse_aitchison(x1, x2):
     row_rmse = np.sqrt(np.sum(squared, axis=(1, 2)) / (2 * D))
     return np.mean(row_rmse)
 
+
+
+def aitchison_mean(y):
+    """
+    Compute the Aitchison (compositional) mean of compositional data.
+    
+    Parameters:
+    y (numpy.ndarray): Matrix of shape (n, J) where each row is a composition
+    
+    Returns:
+    numpy.ndarray: The Aitchison mean composition (length J)
+    """
+    # Geometric mean of each component across samples
+    geometric_means = np.exp(np.mean(np.log(y), axis=0))
+    # Closure operation (normalize to sum to 1)
+    return geometric_means / np.sum(geometric_means)
+
+
+def aitchison_inner_product(x1, x2):
+    """
+    Compute the Aitchison inner product between two compositions.
+    
+    Parameters:
+    x1, x2 (numpy.ndarray): Compositional vectors of length J
+    
+    Returns:
+    float: The Aitchison inner product ⟨x1, x2⟩_A
+    """
+    J = len(x1)
+    log_x1 = np.log(x1)
+    log_x2 = np.log(x2)
+    
+    # Compute the double sum over j and j'
+    inner_sum = 0
+    for j in range(J):
+        for jp in range(J):
+            log_ratio_x1 = np.log(x1[j] / x1[jp])
+            log_ratio_x2 = np.log(x2[j] / x2[jp])
+            inner_sum += log_ratio_x1 * log_ratio_x2
+    
+    # Divide by 2J as per the convention in the paper
+    return inner_sum / (2 * J)
+
+
+def aitchison_norm(x):
+    """
+    Compute the Aitchison norm of a composition.
+    
+    Parameters:
+    x (numpy.ndarray): Compositional vector of length J
+    
+    Returns:
+    float: The Aitchison norm ‖x‖_A
+    """
+    return np.sqrt(aitchison_inner_product(x, x))
+
+
+def aitchison_distance(x1, x2):
+    """
+    Compute the Aitchison distance between two compositions.
+    
+    Parameters:
+    x1, x2 (numpy.ndarray): Compositional vectors of length J
+    
+    Returns:
+    float: The Aitchison distance d_A(x1, x2)
+    """
+    J = len(x1)
+    log_x1 = np.log(x1)
+    log_x2 = np.log(x2)
+    
+    # Compute the double sum over j and j'
+    inner_sum = 0
+    for j in range(J):
+        for jp in range(J):
+            log_ratio_x1 = np.log(x1[j] / x1[jp])
+            log_ratio_x2 = np.log(x2[j] / x2[jp])
+            inner_sum += (log_ratio_x1 - log_ratio_x2) ** 2
+    
+    # Divide by 2J and take square root
+    return np.sqrt(inner_sum / (2 * J))
+
+
+def r2_aitchison(y_true, y_pred):
+    """
+    Compute the Aitchison-based R² coefficient of determination.
+    
+    R_A² = 1 - RSS_A / TSS_A
+    
+    where:
+    - RSS_A = Σ d_A(y_i, ŷ_i)² (residual sum of squares)
+    - TSS_A = Σ d_A(y_i, ȳ_A)² (total sum of squares)
+    - ȳ_A is the Aitchison mean of the observations
+    
+    Parameters:
+    y_true (numpy.ndarray): True compositions, shape (n, J)
+    y_pred (numpy.ndarray): Predicted compositions, shape (n, J)
+    
+    Returns:
+    float: The Aitchison R² value
+    """
+    # Compute Aitchison mean of true values
+    y_mean = aitchison_mean(y_true)
+    
+    # Compute total sum of squares (TSS_A)
+    tss = 0
+    for i in range(len(y_true)):
+        tss += aitchison_distance(y_true[i], y_mean) ** 2
+    
+    # Compute residual sum of squares (RSS_A)
+    rss = 0
+    for i in range(len(y_true)):
+        rss += aitchison_distance(y_true[i], y_pred[i]) ** 2
+    
+    # Compute R²
+    r2 = 1 - (rss / tss) if tss > 0 else 0
+    return r2
+
+
+def r2_aitchison_adjusted(y_true, y_pred, n_params):
+    """
+    Compute the adjusted Aitchison-based R².
+    
+    R_A,adj² = 1 - (1 - R_A²) * (n - 1) / (n - k)
+    
+    where:
+    - n is the number of samples
+    - k is the number of estimated parameters
+    
+    Parameters:
+    y_true (numpy.ndarray): True compositions, shape (n, J)
+    y_pred (numpy.ndarray): Predicted compositions, shape (n, J)
+    n_params (int): Number of estimated parameters in the model
+    
+    Returns:
+    float: The adjusted Aitchison R² value
+    """
+    n = len(y_true)
+    r2 = r2_aitchison(y_true, y_pred)
+    
+    # Handle edge cases
+    if n <= n_params or n <= 1:
+        return r2
+    
+    r2_adj = 1 - (1 - r2) * (n - 1) / (n - n_params)
+    return r2_adj
+
+
+def cosine_similarity_aitchison(y_true, y_pred):
+    """
+    Compute the Aitchison-based cosine similarity.
+    
+    Cosine_A = (1/n) Σ ⟨y_i, ŷ_i⟩_A / (‖y_i‖_A * ‖ŷ_i‖_A)
+    
+    Parameters:
+    y_true (numpy.ndarray): True compositions, shape (n, J)
+    y_pred (numpy.ndarray): Predicted compositions, shape (n, J)
+    
+    Returns:
+    float: The mean Aitchison cosine similarity across all samples
+    """
+    n = len(y_true)
+    total_cosine = 0
+    
+    for i in range(n):
+        inner_prod = aitchison_inner_product(y_true[i], y_pred[i])
+        norm_true = aitchison_norm(y_true[i])
+        norm_pred = aitchison_norm(y_pred[i])
+        
+        # Avoid division by zero
+        if norm_true > 0 and norm_pred > 0:
+            cosine = inner_prod / (norm_true * norm_pred)
+        else:
+            cosine = 0
+        
+        total_cosine += cosine
+    
+    return total_cosine / n

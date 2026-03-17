@@ -20,11 +20,6 @@ Y <- as.data.frame(data_arctic[, c('sand', 'silt', 'clay')])
 #W_mat <- as.matrix(read_csv("W_arctic_cont.csv"))
 #W_mat <- as.matrix(read_csv("W_arctic_dist.csv"))
 
-W_mat <- as.matrix(read_csv("W_arctic_cont_20.csv"))
-#W_mat <- as.matrix(read_csv("W_arctic_dist_15.csv"))
-W <- mat2listw(W_mat, style="W")
-data_arctic$depth_scaled <- (data_arctic$depth-mean(data_arctic$depth))/sd(data_arctic$depth)
-data_arctic$depth_scaled_square <- data_arctic$depth_scaled**2
 
 lr_Y <- lr(Y)
 
@@ -65,6 +60,136 @@ rmse_aitchison <- function(x1, x2) {
 }
 
 
+
+#####
+
+aitchison_mean <- function(y) {
+  # Geometric mean of each component across samples
+  geometric_means <- exp(colMeans(log(y)))
+  # Closure operation (normalize to sum to 1)
+  return(geometric_means / sum(geometric_means))
+}
+
+
+aitchison_inner_product <- function(x1, x2) {
+  J <- length(x1)
+  log_x1 <- log(x1)
+  log_x2 <- log(x2)
+  
+  # Compute the double sum over j and j'
+  inner_sum <- 0
+  for (j in 1:J) {
+    for (jp in 1:J) {
+      log_ratio_x1 <- log(x1[j] / x1[jp])
+      log_ratio_x2 <- log(x2[j] / x2[jp])
+      inner_sum <- inner_sum + log_ratio_x1 * log_ratio_x2
+    }
+  }
+  
+  # Divide by 2J as per the convention in the paper
+  return(inner_sum / (2 * J))
+}
+
+
+aitchison_norm <- function(x) {
+  return(sqrt(aitchison_inner_product(x, x)))
+}
+
+
+aitchison_distance <- function(x1, x2) {
+  J <- length(x1)
+  log_x1 <- log(x1)
+  log_x2 <- log(x2)
+  
+  # Compute the double sum over j and j'
+  inner_sum <- 0
+  for (j in 1:J) {
+    for (jp in 1:J) {
+      log_ratio_x1 <- log(x1[j] / x1[jp])
+      log_ratio_x2 <- log(x2[j] / x2[jp])
+      inner_sum <- inner_sum + (log_ratio_x1 - log_ratio_x2)^2
+    }
+  }
+  
+  # Divide by 2J and take square root
+  return(sqrt(inner_sum / (2 * J)))
+}
+
+
+r2_aitchison_adjusted <- function(y_true, y_pred, n_params) {
+  if (is.vector(y_true)) y_true <- t(as.matrix(y_true))
+  if (is.vector(y_pred)) y_pred <- t(as.matrix(y_pred))
+  
+  n <- nrow(y_true)
+  J <- ncol(y_true)
+  
+  y_mean <- exp(colMeans(log(y_true))) / sum(exp(colMeans(log(y_true))))
+  
+  tss <- 0
+  rss <- 0
+  for (i in 1:n) {
+    tss <- tss + sum((log(y_true[i,]) - log(y_mean))^2) / J
+    rss <- rss + sum((log(y_true[i,]) - log(y_pred[i,]))^2) / J
+  }
+  
+  r2 <- if (tss > 0) 1 - (rss / tss) else 0
+  if (n <= n_params || n <= 1) return(r2)
+  1 - (1 - r2) * (n - 1) / (n - n_params)
+}
+
+cosine_similarity_aitchison <- function(y_true, y_pred) {
+  if (is.vector(y_true)) y_true <- t(as.matrix(y_true))
+  if (is.vector(y_pred)) y_pred <- t(as.matrix(y_pred))
+  
+  n <- nrow(y_true)
+  J <- ncol(y_true)
+  
+  total_cosine <- 0
+  for (i in 1:n) {
+    log_true <- log(y_true[i,])
+    log_pred <- log(y_pred[i,])
+    
+    inner_sum <- 0
+    norm_true_sum <- 0
+    norm_pred_sum <- 0
+    for (j in 1:J) {
+      for (jp in 1:J) {
+        lr_true <- log_true[j] - log_true[jp]
+        lr_pred <- log_pred[j] - log_pred[jp]
+        inner_sum <- inner_sum + lr_true * lr_pred
+        norm_true_sum <- norm_true_sum + lr_true^2
+        norm_pred_sum <- norm_pred_sum + lr_pred^2
+      }
+    }
+    
+    inner <- inner_sum / (2 * J)
+    norm_true <- sqrt(norm_true_sum / (2 * J))
+    norm_pred <- sqrt(norm_pred_sum / (2 * J))
+    
+    if (norm_true > 0 && norm_pred > 0) {
+      total_cosine <- total_cosine + inner / (norm_true * norm_pred)
+    }
+  }
+  
+  total_cosine / n
+}
+
+
+
+
+
+#####
+
+
+W_mat <- as.matrix(read_csv("W_arctic_cont_20.csv"))
+#W_mat <- as.matrix(read_csv("W_arctic_dist_15.csv"))
+W <- mat2listw(W_mat, style="W")
+data_arctic$depth_scaled <- (data_arctic$depth-mean(data_arctic$depth))/sd(data_arctic$depth)
+data_arctic$depth_scaled_square <- data_arctic$depth_scaled**2
+
+
+
+
 list_pred <- matrix(nrow = 0, ncol = 3)
 list_r2 <- cbind()
 list_rmse <- cbind()
@@ -78,13 +203,13 @@ for (i in 1:nrow(data_arctic)) {
   W_mat_training <- W_mat[-i, -i]
   training_W <- mat2listw(W_mat_training, style="W")
   
-  #mod1 <- lagsarlm(sand_lr ~ depth_scaled, data=training_data, listw=training_W)
-  #mod2 <- lagsarlm(silt_lr ~ depth_scaled, data=training_data, listw=training_W)
-  #mod3 <- lagsarlm(clay_lr ~ depth_scaled, data=training_data, listw=training_W)
+  mod1 <- lagsarlm(sand_lr ~ depth_scaled, data=training_data, listw=training_W)
+  mod2 <- lagsarlm(silt_lr ~ depth_scaled, data=training_data, listw=training_W)
+  mod3 <- lagsarlm(clay_lr ~ depth_scaled, data=training_data, listw=training_W)
   
-  mod1 <- lagsarlm(sand_lr ~ depth_scaled + depth_scaled_square, data=training_data, listw=training_W)
-  mod2 <- lagsarlm(silt_lr ~ depth_scaled + depth_scaled_square, data=training_data, listw=training_W)
-  mod3 <- lagsarlm(clay_lr ~ depth_scaled + depth_scaled_square, data=training_data, listw=training_W)
+  #mod1 <- lagsarlm(sand_lr ~ depth_scaled + depth_scaled_square, data=training_data, listw=training_W)
+  #mod2 <- lagsarlm(silt_lr ~ depth_scaled + depth_scaled_square, data=training_data, listw=training_W)
+  #mod3 <- lagsarlm(clay_lr ~ depth_scaled + depth_scaled_square, data=training_data, listw=training_W)
   
   Xbeta1 <- mod1$coefficients[1]*data_arctic$depth_scaled
   Xbeta2 <- mod2$coefficients[1]*data_arctic$depth_scaled
@@ -99,15 +224,46 @@ for (i in 1:nrow(data_arctic)) {
   
   list_pred <- rbind(list_pred, pred[i,])
   pred_i <- lr_inv(pred[i,])
-  list_r2 <- rbind(list_r2, cor(as.numeric(pred_i), as.numeric(Y[i,])) ^ 2)
+  #list_r2 <- rbind(list_r2, cor(as.numeric(pred_i), as.numeric(Y[i,])) ^ 2)
+  list_r2 <- rbind(list_r2, r2_aitchison_adjusted(Y[i,], pred_i, n_params = 3))
   list_rmse <- rbind(list_rmse, mean(as.numeric((pred_i - Y[i,])^2)))
   list_crossentropy <- rbind(list_crossentropy, sum(Y[i,] * log(pred_i)))
-  list_similarity <- rbind(list_similarity, cos_similarity(Y[i,], pred_i))
+  #list_similarity <- rbind(list_similarity, cos_similarity(Y[i,], pred_i))
+  list_similarity <- rbind(list_similarity, 
+                           cosine_similarity_aitchison(
+                             matrix(as.numeric(Y[i,]), nrow=1), 
+                             matrix(as.numeric(pred_i), nrow=1)
+                           )
+  )
   list_rmse_a <- rbind(list_rmse_a, rmse_aitchison(Y[i,], pred_i))
 }
 
 
 
+training_data <- data_arctic[-35, ]
+W_mat_training <- W_mat[-35, -35]
+training_W <- mat2listw(W_mat_training, style="W")
+
+mod1 <- lagsarlm(sand_lr ~ depth_scaled, data=training_data, listw=training_W)
+mod2 <- lagsarlm(silt_lr ~ depth_scaled, data=training_data, listw=training_W)
+mod3 <- lagsarlm(clay_lr ~ depth_scaled, data=training_data, listw=training_W)
+
+Xbeta1 <- mod1$coefficients[1]*data_arctic$depth_scaled
+Xbeta2 <- mod2$coefficients[1]*data_arctic$depth_scaled
+Xbeta3 <- mod3$coefficients[1]*data_arctic$depth_scaled
+
+rho = mean(c(mod1$rho, mod2$rho, mod3$rho))
+Minv = solve( diag(nrow(W_mat)) - rho*W_mat )
+
+pred <- data.frame(sand = Minv %*% Xbeta1,
+                   silt = Minv %*% Xbeta2,
+                   clay = Minv %*% Xbeta3)
+
+pred_i <- lr_inv(pred[35,])
+
+
+r2_aitchison_adjusted(Y[35,], pred_i, n_params = 3)
+cor(as.numeric(pred_i), as.numeric(Y[i,]))^2
 
 ### ORDER 1 ###
 
@@ -125,6 +281,12 @@ sqrt(var(list_similarity))
 mean(list_rmse_a)
 sqrt(var(list_rmse_a))
 
+# R2 aitchison
+mean(list_r2)
+sqrt(var(list_r2))
+# Cos similarity aitchison
+mean(list_similarity)
+sqrt(var(list_similarity))
 
 ## Distance
 # R2 = 0.5911055 (0.2779419)
@@ -300,3 +462,10 @@ a = (n-1)/(n-k)
 1 - (1-R)*a
 stdR = 0.0027
 stdR*a
+
+
+
+
+##########
+
+
